@@ -9,11 +9,13 @@ import {
   showToast,
   confirmAlert,
   Alert,
+  open,
 } from "@raycast/api";
 import { Bookmark } from "../types";
 import { getFavicon } from "@raycast/utils";
 import fetch from "node-fetch";
 import { BookmarkForm } from "./BookmarkForm";
+import { useCollections } from "../hooks/useCollections";
 
 function ActionEditBookmark(props: { bookmark: Bookmark; revalidate: () => void }) {
   const { bookmark, revalidate } = props;
@@ -53,6 +55,7 @@ export default function BookmarkItem(props: { bookmark: Bookmark; revalidate: ()
   const { bookmark, revalidate } = props;
 
   const preferences = getPreferenceValues();
+  const { data: collectionsData } = useCollections();
 
   const getDetails = () => {
     let md = `# ${bookmark.title}\n`;
@@ -110,6 +113,46 @@ export default function BookmarkItem(props: { bookmark: Bookmark; revalidate: ()
       },
     };
     await confirmAlert(options);
+  }
+
+  async function handleOpenAndArchive() {
+    try {
+      // まずブックマークを開く
+      await open(bookmark.link);
+      
+      const archiveCollection = collectionsData?.items?.find(c => c.title.toLowerCase() === 'archive');
+      
+      if (!archiveCollection) {
+        throw new Error('Archive collection not found');
+      }
+      
+      const response = await fetch(`https://api.raindrop.io/rest/v1/raindrop/${bookmark._id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${preferences.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          collection: {
+            $id: archiveCollection._id
+          }
+        }),
+      });
+
+      if (response.status === 200) {
+        revalidate();
+      } else {
+        throw new Error(response.statusText);
+      }
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('collection') || error.message.includes('move'))) {
+        showToast({
+          style: Toast.Style.Failure,
+          title: "Archive移動に失敗しました",
+          message: error.message
+        });
+      }
+    }
   }
 
   const lastUpdatedDate = new Date(bookmark.lastUpdate);
@@ -232,6 +275,12 @@ export default function BookmarkItem(props: { bookmark: Bookmark; revalidate: ()
             }
           />
           <ActionEditBookmark bookmark={bookmark} revalidate={revalidate} />
+          <Action
+            onAction={handleOpenAndArchive}
+            title="Open and Archive"
+            shortcut={{ modifiers: ["cmd"], key: "o" }}
+            icon={Icon.ArrowDown}
+          />
           <Action
             onAction={handleDelete}
             title="Delete Bookmark"
